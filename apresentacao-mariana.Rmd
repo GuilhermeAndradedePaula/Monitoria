@@ -1,0 +1,384 @@
+---
+title: "Apresentação de Artigo"
+subtitle: "Análise do Mercado financeiro Via Medidas de Centralidade: Uma Aplicação ao ìndice DOW30 dos Estados Unidos"
+author: "Mariana Duque Funkel e Renata Raposo Del-Vecchio"
+institute: "Universidade Federal Fluminense"
+date: "05/05/2021"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+    includes:
+     after_body: insert-logo.html
+---
+
+```{r setuo, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, comment = '')
+```
+
+```{r library, include=FALSE}
+library(BatchGetSymbols)
+library(plyr)
+library(tidyr)
+library(Hmisc)
+library(corrplot)
+library(igraph)
+library(bc3net)
+library(CINNA)
+library(Matrix)
+library(rgl)
+library(data.table)
+library(gridExtra)
+library(tcltk)
+library(ggm)
+library(rvest)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(magrittr)
+source("http://www.sthda.com/upload/rquery_cormat.r")
+```
+
+```{r read-data, include=FALSE, cache=TRUE}
+knitr::read_chunk("aula.R")
+```
+
+```{r, include=FALSE, cache=TRUE}
+load("~/2021.1/Monitoria/d30.dta")
+d30 <- d30$df.tickers
+db <- d30 %>% drop_na(ret.closing.prices)
+db <- db[,c('ref.date','ticker','ret.closing.prices')]
+wdb <- pivot_wider(db, names_from = ticker, values_from = ret.closing.prices)
+op <- colnames(wdb[-1])
+mat.cor <- rquery.cormat(select(wdb, -c('ref.date')),
+                         type = 'full')
+mat.cor <- mat.cor$r
+cor <- rquery.cormat(select(wdb, -c('ref.date')),
+                     type = 'flatten')
+cor <- cor$r
+cor <- arrange(cor, cor)
+fr <- mean(cor[,3])
+fr
+g <- graph_from_adjacency_matrix(mat.cor, mode = "undirected", weighted = TRUE, diag = FALSE)
+str <- strength(g, vids = V(g), mode = "all", loops = FALSE)
+str <- as.data.frame(str)
+str <- tibble::rownames_to_column(str, "Código da Ação")
+str <- arrange(str, desc(str))
+str1 <- str[1:14,]
+str2 <- str[15:30,]
+cor <- cor[which(cor$cor > mean(cor[,3])),]
+names(cor)[1] <- "from"
+names(cor)[2] <- "to"
+names(cor)[3] <- "weight"
+load("~/2021.1/Monitoria/g.dta")
+adj.mat <- as_adjacency_matrix(g, type = "both")
+g.adj <- graph_from_adjacency_matrix(adj.mat, mode = "undirected", weighted = NULL)
+dg <- degree(g.adj)
+dg <- as.data.frame(dg)
+dg <- tibble::rownames_to_column(dg, "Código da Ação")
+dg <- arrange(dg, desc(dg))
+eigg <- eigen_centrality(g.adj, scale = FALSE, weights = NULL)$vector
+eigg <- as.data.frame(eigg)
+eigg <- tibble::rownames_to_column(eigg, "Código da Ação")
+eigg <- arrange(eigg, desc(eigg))
+```
+
+# Índice
+
+##1. Introdução
+##2. Noções Preliminares
+##3. Definições de Centralidade
+##4. Metodologia
+##5. Análise dos resultados do índice DOW30
+##6. Conclusão
+
+---
+
+# 1. Introdução
+
+Grafos não direcionados são estruturas formadas por dois conjuntos chamados de vértices e arestas. Servem para modelar problemas que envolvem objetos e relações entre eles.
+
+$$G=(V(G),E(G))$$
+Dentre as muitas aplicações de grafos, uma delas é a análise de comportamento de ativos em uma rede de instrumentos financeiros.
+
+.pull-left[ Boginsky et al. 2005
+- Clique
+- *Power Law*
+
+Abreu et al. 2019
+
+- Centralidade
+  - *strength*
+  - grau (*indegree* e *outdegree*)
+]
+
+.pull-right[ D'Errico et al. 2009
+- Centralidades
+  - intermediação
+  - *flow betweenness*
+  - grau (*indegree* e *outdegree*)
+  
+Tabak et al. 2010
+- *cluster*
+- Centralidades
+  - *strength*
+  - proximidade
+]
+
+---
+
+## O índice DOW 30
+
+- Criado em 1896
+- Charles Dow
+- Um dos principais indicadores da bolsa de valores dos EUA
+- Composto pelas 30 empresas líderes em seu segmento de mercado
+
+`r op`
+
+---
+
+# 2. Noções Prelimináres
+
+Considerando G um grafo simples, não direcionado, com n vértices.
+
+**Definição 1:** A matriz de adjacência A(G) de um grafo é uma matriz *n x n*, em que $a_{ij}$ = 1, se o vértice $v_i$ é adjacente ao vértice $v_j$, e $a_{ij} = 0$, caso contrário.
+
+.pull-left[
+```{r, tidy=TRUE}
+g <- graph(edges = c("v1","v2","v1","v3","v2","v4","v3","v4","v4","v5"))
+g <- as.undirected(g, mode = "collapse")
+ma <- as_adjacency_matrix(g, type = "both") %>% as.matrix(g)
+coords <- layout.davidson.harel(g)
+plot(g, vertex.size = 20, layout = coords)
+```
+]
+.pull-center[$$A(G) = $$]
+.pull-right[
+```{r, tidy=TRUE} 
+ma
+```
+]
+
+---
+
+**Definição 2:** A matriz de adjacência A(G) de um grafo ponderado G é uma matriz *n x n*, em que $a_{ij} = \sigma (v_i v_j)$ representa o valor do peso da aresta $v_i v_j$, se $v_i$ e $v_j$ são adjacentes e $a_{ij} = 0$ caso contrário.
+
+.pull-left[
+```{r }
+g <- set_edge_attr(g, "weight", value = c(-3,1,2,6,-5))
+map <- as_adjacency_matrix(g, type = "both", attr = "weight") %>% as.matrix(g)
+plot(g, vertex.size = 20, edge.label = E(g)$weight, edge.lty = ifelse(E(g)$weight > 0, "solid", "dashed"), layout = coords)
+```
+]
+.pull-center[$$A(G) = $$]
+.pull-right[
+```{r, tidy=TRUE}
+map
+```
+]
+
+---
+
+**Definição 3:** A matriz de adjacência A(G) de um *signed graph* G é uma matriz *n x n*, em que $a_{ij} = 1$ ou $a_{ij} = -1$, representam uma aresta $v_i v_j$ positiva ou negativa, respectivamente, se $v_i$ e $v_j$ são adjacentes, sendo o valor de $a_{ij} = 0$ caso contrário.
+
+.pull-left[
+```{r }
+g <- set_edge_attr(g, "weight", value = c(-1,1,1,1,-1))
+map <- as_adjacency_matrix(g, type = "both", attr = "weight") %>% as.matrix(g)
+plot(g, vertex.size = 20, edge.lty = ifelse(E(g)$weight > 0, "solid", "dashed"), layout = coords)
+```
+]
+.pull-center[$$A(G) = $$]
+.pull-right[
+```{r, tidy=TRUE}
+map
+```
+]
+
+---
+
+#3. Definições de Centralidade
+
+Introduzida por Bavelas (1950). A teoria de centralidade em redes busca medir qual o vétice mais importante de uma rede modelada por grafo. existem diferentes tipos de centralidade e a escolha depende da finalidade da análise. 
+
+No artigo foram utilizadas as centralidades de grau, autovetor e *strength* para análise de importancia das ações que compõe o índica DOW30.
+
+### 3.1 Centralidade de Grau
+
+Introduzida em Freeman (1979), considera que os nós com maior grau são os mais centrais. O grau mede a quantidade de arestas que um vértice possui, isto é, a quantidade de vértices a que o nó está ligado diretamente.
+
+**Definição 4:** Seja G um grafo qualquer com *n* vértices e seja $v_k$ um vértice de G. A centralidade de grau de $v_k$, denotada por $d(v_k)$, é o número de arestas incidentes a $v_k$. Isto é, $d(v_k) = \sum_{j=1}^na_{kj}$ onde $a_{kj}$ são elementos da matriz de adjacência A(G).
+
+---
+
+### 3.1 Centralidade de Grau
+
+.pull-left[
+```{r, tidy=TRUE}
+plot(g, vertex.size = 20, layout = coords)
+d <- degree(g)
+```
+]
+.pull-right[
+```{r, tidy=TRUE} 
+ma
+d
+```
+]
+
+---
+
+### 3.2 Centralidade de Força
+
+A *strenght centrality* decorre de uma extensão da centralidade de grau, ver Barrat et al. (2004) e Newman (2001). Utilizada em grafos ponderados, calculada através da soma dos pesos das arestas de cada vértice, medindo assim a intensidade ou força do nó analisado.
+
+**Definição 5:** Seja G um grafo ponderado com *n* vértices e seja $v_k$ um vértice de G. A centralidade *strength* de $v_k$, denotada por $SC(v_k)$, é a soma dos pesos das arestas incidentes a $v_k$. Isto é, $SC(v_k) = \sum_{j=1}^na_{kj}$ onde $a_{kj}$ representa cada elemento da linha k da matriz com os pesos das arestas do grafo G.
+
+
+.pull-left[
+```{r, tidy=TRUE}
+g <- set_edge_attr(g, "weight", value = c(-3,1,2,6,-5))
+map <- as_adjacency_matrix(g, type = "both", attr = "weight") %>% as.matrix(g)
+plot(g, vertex.size = 20, edge.label = E(g)$weight, edge.lty = ifelse(E(g)$weight > 0, "solid", "dashed"), layout = coords)
+stre <- strength(g, vids = V(g), mode = "all", loops = FALSE)
+```
+]
+.pull-right[
+```{r, tidy=TRUE} 
+map
+stre
+```
+]
+
+---
+
+### 3.2 Centralidade de Autovetor
+
+Introduzida por Bonacich (1987). A centralidade de autovetor mede a importância de um vértice considerandoa relevância dos vértice vizinhos. Considerando um grafo G, com todas as restas positivas, as maiores entradas do autovetor da matriz de adjacência A(G), associado ao maior autovalor correspondem aos vértices com maior centralidade de autovetor.
+
+
+**Definição 6:** Seja G um grafo conexo com *n* vértices e seja $v_k$ um vértice de G. A centralidade de autovetor de $v_k$ é dada por:
+$$c_{eig}(v_k) = x_k$$
+onde $x_k$ é a k-ésima coordenada do autovetor positivo unitário $x$ associado ao maior autovalor da matriz de adjancência A(G) do grafo, denotado por $\rho$, isto é,
+$$x_k = \frac{1}{\rho}\sum_{j=1}^na_{kj}x_j$$$$k = 1,...,n$$
+---
+
+#4. Metodologia
+
+Neste trabalho, foram coletados os dados diários dos preços de fechamento das ações que compõem o índice Dow 30 durante o período de janeiro de 2018 a dezembro de 2018. A partir destes valores foi calculada a variação percentual diária de cada ação, normalizando assim os valores para avaliar os dados sem impacto das diferenças da amplitude dos preços das ações.
+
+De posse destes dados, foi calculada a correlação de cada ação em relação às demais ações componentes do índice analisado, formando assim uma matriz de correlações de dimensão 30 x 30. Esta matriz pode ser vista como a matriz do grafo ponderado das ações, onde o peso de cada aresta é dado pela correlação entre as ações correspondentes. Estes dados foram utilizados para análise da centralidade strength das ações.
+
+---
+
+```{r , fig.align='center', fig.height=10}
+rquery.cormat(select(wdb, -c('ref.date')),
+                         type = 'full')
+```
+
+---
+
+###4.1 Fator de Relevância
+
+Para utilizar as outras medidas de centralidade foi necessário transformar a matriz de correlações em uma matriz de adjacência de um grafo com sinal. Para tal foram criados dois parâmetros denominados “fator de relevância positivo” e “fator de relevância negativo”.
+
+Se $a_{kj} > FR+$ então $a_{kj} = 1$, senão $a_{kj} = 0$
+
+Se $a_{kj} < FR-$ então $a_{kj} = -1$, senão $a_{kj} = 0$
+
+$FR+ =$ `r fr`
+
+---
+
+#5. Análise dos resultados do índice DOW30
+
+- Considerando primeiro a matriz de correlações, que corresponde a um grafo completo ponderado.
+
+.pull-center[
+```{r results='asis'}
+kbl(str, "html", col.names = c("Código da Ação", "Centralidade Strength"), align = "cc", digits = 2) %>%
+  kable_paper() %>%
+    scroll_box(width = "700px", height = "350px")
+```
+]
+
+---
+
+```{r , fig.align='center', fig.fullwidth = TRUE, fig.width=10, fig.height=10}
+g <- graph_from_data_frame(cor[,1:3], directed = FALSE, vertices = op)
+plot(g, layout = layout.fruchterman.reingold,vertex.size = 5, vertex.label.dist = 1, label.cex = 0.1, edge.width = E(g)$weight, main = "Grafo do índice DOW30") # Grafo
+```
+
+---
+
+- Considerando a matriz de adjacência
+
+.pull-center[
+```{r results='asis'}
+kbl(dg, "html", col.names = c("Código da Ação", "Centralidade de Grau"), align = "cc", digits = 2) %>%
+  kable_paper() %>%
+    scroll_box(width = "500px", height = "500px")
+```
+]
+
+---
+
+.pull-center[
+```{r results='asis'}
+kbl(eigg, "html", col.names = c("Código da Ação", "Centralidade de Autovetor"), align = "cc", digits = 2) %>%
+  kable_paper() %>%
+    scroll_box(width = "500px", height = "500px")
+```
+]
+
+---
+
+- *Power Law*
+
+```{r , results='hide'}
+# plot and fit the power law distribution
+fit_power_law = function(graph) {
+  # calculate degree
+  d = degree(graph)
+  dd = degree.distribution(graph, cumulative = FALSE)
+  degree = 1:max(d)
+  probability = dd[-1]
+  # delete blank values
+  nonzero.position = which(probability != 0)
+  probability = probability[nonzero.position]
+  degree = degree[nonzero.position]
+  reg = lm(log(probability) ~ log(degree))
+  cozf = coef(reg)
+  power.law.fit = function(x) exp(cozf[[1]] + cozf[[2]] * log(x))
+  alpha = -cozf[[2]]
+  R.square = summary(reg)$r.squared
+  # plot
+  plot(probability ~ degree, log = "xy", xlab = "Degree (log)", ylab = "Probability (log)", 
+       col = 1, main = "Degree Distribution")
+  curve(power.law.fit, col = "red", add = T, n = length(d))
+}
+fit <- fit_power_law(g.adj)
+fit
+```
+
+---
+
+#6. Conclusão
+
+- Correlações
+
+- Centralidades
+
+- Sugestão de trabalhos futuros: verificar se estas ações se mantêm como as mais importantes no decorrer dos anos, e caso esta ordenação se altere, observar os fatores que podem ter impactado na mudança da ordenação.
+
+---
+class: inverse, center, middle
+
+# Obrigado!
+
+- [CÓDIGOS]()
+- Apresentado com [Xaringan](https://slides.yihui.org/xaringan/#1)
