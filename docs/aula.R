@@ -125,6 +125,14 @@ mat.cor <- rquery.cormat(select(wdb, -c('ref.date')),
                          type = 'full')
 mat.cor
 mat.cor <- mat.cor$r
+
+#salvar para aula 2
+class(mat.cor)
+library(xlsx)
+library(Hmisc)
+write.xlsx(as.data.frame(mat.cor), file = "matrizcor.xlsx")
+
+
 cor <- rquery.cormat(select(wdb, -c('ref.date')),
                      type = 'flatten')
 cor
